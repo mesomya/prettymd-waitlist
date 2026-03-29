@@ -1,0 +1,5 @@
+index-dark.html
+index-light.html
+.env
+.env.local
+.playwright-mcp/

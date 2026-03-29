@@ -1,0 +1,984 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PrettyMD — Markdown viewer for vibe coders</title>
+  <meta name="description" content="The prettiest way to read, navigate, and diff your markdown files. Launching April 3rd.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
+
+  <!-- Grain SVG filter -->
+  <svg style="position:absolute;width:0;height:0">
+    <filter id="grain">
+      <feTurbulence type="fractalNoise" baseFrequency="0.6" numOctaves="3" stitchTiles="stitch"/>
+      <feColorMatrix type="saturate" values="0"/>
+    </filter>
+  </svg>
+
+  <style>
+    *, *::before, *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --bg: #1a1816;
+      --bg-subtle: #EFEDEA;
+      --surface: #FDFCFA;
+      --surface-raised: #FFFFFF;
+      --ink: #1C1B19;
+      --ink-muted: #6E6A63;
+      --ink-faint: #A8A39C;
+      --accent: #34B892;
+      --accent-hover: #2DA37F;
+      --accent-soft: rgba(52, 184, 146, 0.08);
+      --border: rgba(28, 27, 25, 0.08);
+      --border-strong: rgba(28, 27, 25, 0.14);
+      --shadow-sm: 0 1px 3px rgba(28, 27, 25, 0.04);
+      --shadow-md: 0 4px 20px rgba(28, 27, 25, 0.06), 0 1px 3px rgba(28, 27, 25, 0.04);
+      --shadow-lg: 0 16px 48px rgba(28, 27, 25, 0.08), 0 2px 6px rgba(28, 27, 25, 0.03);
+      --font-display: 'Instrument Serif', Georgia, 'Times New Roman', serif;
+      --font-body: 'DM Sans', system-ui, -apple-system, sans-serif;
+      --ease-fast: cubic-bezier(0.22, 0.68, 0, 1);
+      --ease-smooth: cubic-bezier(0.16, 0.6, 0.2, 1);
+      --radius-sm: 8px;
+      --radius-md: 14px;
+      --radius-lg: 24px;
+      --radius-xl: 32px;
+    }
+
+    html {
+      font-size: 16px;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+    }
+
+    body {
+      font-family: var(--font-body);
+      background: var(--bg);
+      color: var(--ink);
+      min-height: 100vh;
+      overflow-x: hidden;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Grain overlay ── */
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 24px;
+      filter: url(#grain);
+      opacity: 0.03;
+      pointer-events: none;
+      z-index: 9999;
+    }
+
+    /* ── Canvas wave background ── */
+    #waves {
+      position: fixed;
+      inset: 24px;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    /* ── Navigation ── */
+    nav {
+      position: relative;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 40px;
+      height: 72px;
+      flex-shrink: 0;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-family: var(--font-display);
+      font-weight: 400;
+      font-style: italic;
+      font-size: 22px;
+      color: #E8E4DF;
+      letter-spacing: -0.02em;
+      text-decoration: none;
+    }
+
+    .logo img {
+      height: 72px;
+      width: auto;
+      display: block;
+    }
+
+    .nav-cta {
+      font-family: var(--font-body);
+      font-size: 14px;
+      font-weight: 500;
+      color: #E8E4DF;
+      background: transparent;
+      border: 1.5px solid rgba(232, 228, 223, 0.2);
+      padding: 9px 22px;
+      border-radius: 100px;
+      cursor: pointer;
+      transition: all 200ms var(--ease-fast);
+      letter-spacing: -0.01em;
+    }
+
+    .nav-cta:hover {
+      background: #E8E4DF;
+      color: var(--bg);
+      border-color: #E8E4DF;
+      transform: translateY(-1px);
+    }
+
+    /* ── Main content ── */
+    main {
+      position: relative;
+      z-index: 5;
+      flex: 1;
+      display: flex;
+      padding: 0 19px 19px;
+      min-height: 0;
+    }
+
+    /* ── Hero card — fills viewport below nav ── */
+    .hero-card {
+      width: 100%;
+      background: var(--surface-raised);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 80px 56px 56px;
+      box-shadow: var(--shadow-lg);
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Subtle inner glow at top of card */
+    .hero-card::before {
+      content: '';
+      position: absolute;
+      top: -120px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 600px;
+      height: 300px;
+      background: radial-gradient(ellipse, rgba(52, 184, 146, 0.06) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    /* ── Pill animation ── */
+    .pills-container {
+      position: absolute;
+      inset: 24px;
+      overflow: hidden;
+      z-index: 0;
+      -webkit-mask-image: radial-gradient(ellipse 55% 75% at 50% 50%, transparent 0%, rgba(0,0,0,0.15) 35%, black 70%),
+                          linear-gradient(to right, transparent 0%, black 10%, black 90%, transparent 100%);
+      -webkit-mask-composite: destination-in;
+      mask-image: radial-gradient(ellipse 55% 75% at 50% 50%, transparent 0%, rgba(0,0,0,0.15) 35%, black 70%),
+                  linear-gradient(to right, transparent 0%, black 10%, black 90%, transparent 100%);
+      mask-composite: intersect;
+    }
+
+    .pill-row {
+      display: flex;
+      position: absolute;
+      left: 0;
+      white-space: nowrap;
+      gap: 15px;
+      animation-timing-function: linear;
+      animation-iteration-count: infinite;
+    }
+
+    .pill {
+      height: 8px;
+      border-radius: 13px;
+      flex-shrink: 0;
+    }
+
+    @keyframes goRight {
+      from { transform: translateX(-50%); }
+      to { transform: translateX(0%); }
+    }
+
+    @keyframes goLeft {
+      from { transform: translateX(0%); }
+      to { transform: translateX(-50%); }
+    }
+
+    /* Ensure hero content sits above pills */
+    .hero-card > *:not(.pills-container) {
+      position: relative;
+      z-index: 1;
+    }
+
+    /* ── Badge ── */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--ink-muted);
+      background: #F5F2EE;
+      border: 1px solid var(--border);
+      padding: 8px 20px 8px 16px;
+      border-radius: 100px;
+      letter-spacing: -0.01em;
+      margin-bottom: 36px;
+    }
+
+    .pulse-dot {
+      width: 8px;
+      height: 8px;
+      background: var(--accent);
+      border-radius: 50%;
+      position: relative;
+      flex-shrink: 0;
+    }
+
+    .pulse-dot::after {
+      content: '';
+      position: absolute;
+      inset: -2px;
+      border-radius: 50%;
+      background: var(--accent);
+      opacity: 0;
+      animation: pulse 2.5s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); opacity: 0.5; }
+      50% { transform: scale(2.8); opacity: 0; }
+    }
+
+    /* ── Headline ── */
+    h1 {
+      font-family: var(--font-display);
+      font-weight: 400;
+      font-size: clamp(3rem, 6vw, 4rem);
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+      color: var(--ink);
+      margin-bottom: 16px;
+      text-wrap: balance;
+    }
+
+    .subheadline {
+      font-size: 19px;
+      font-weight: 400;
+      color: var(--ink-muted);
+      line-height: 1.5;
+      margin-bottom: 44px;
+      letter-spacing: -0.01em;
+    }
+
+    /* ── Waitlist form ── */
+    .waitlist-form {
+      display: flex;
+      align-items: center;
+      flex-wrap: nowrap;
+      gap: 0;
+      width: fit-content;
+      max-width: min(500px, 90vw);
+      margin: 0 auto;
+      background: #F5F2EE;
+      border: 1.5px solid var(--border-strong);
+      border-radius: 100px;
+      padding: 6px 6px 6px 28px;
+      transition: border-color 250ms var(--ease-fast), box-shadow 250ms var(--ease-fast);
+    }
+
+    .waitlist-form:focus-within {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 4px var(--accent-soft);
+    }
+
+    .waitlist-form input {
+      flex: 1;
+      font-family: var(--font-body);
+      font-size: 16px;
+      font-weight: 400;
+      color: var(--ink);
+      background: transparent;
+      border: none;
+      outline: none;
+      padding: 12px 0;
+      min-width: 0;
+      letter-spacing: -0.01em;
+    }
+
+    .waitlist-form input::placeholder {
+      color: var(--ink-faint);
+    }
+
+    .btn-primary {
+      font-family: var(--font-body);
+      font-size: 15px;
+      font-weight: 600;
+      color: white;
+      background: #1D9E75;
+      border: none;
+      padding: 12px 28px;
+      border-radius: 100px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.2s ease;
+      letter-spacing: -0.01em;
+    }
+
+    .btn-primary:hover {
+      background: #178a65;
+      transform: scale(1.03);
+    }
+
+    .btn-primary:active {
+      transform: scale(0.96);
+    }
+
+    .btn-primary.pop {
+      animation: btnPop 0.4s ease forwards;
+    }
+
+    @keyframes btnPop {
+      0% { transform: scale(0.96); }
+      60% { transform: scale(1.04); }
+      100% { transform: scale(1); }
+    }
+
+    .btn-primary .mail-icon {
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+    }
+
+    /* ── Form message ── */
+    .form-msg {
+      font-family: var(--font-body);
+      font-size: 13px;
+      margin-top: 10px;
+      letter-spacing: -0.01em;
+      min-height: 20px;
+    }
+
+    .form-msg.error { color: #c44; font-size: 12px; }
+    .form-msg.info { color: var(--ink-muted); }
+    .form-msg.success { color: #1D9E75; }
+    .form-msg.amber { color: #b07d2e; font-size: 13px; }
+
+    /* ── Loading dots ── */
+    .loading-dots {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      height: 18px;
+    }
+
+    .loading-dots span {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: white;
+      animation: dotPulse 1.2s ease-in-out infinite;
+    }
+
+    .loading-dots span:nth-child(2) { animation-delay: 0.15s; }
+    .loading-dots span:nth-child(3) { animation-delay: 0.3s; }
+
+    @keyframes dotPulse {
+      0%, 80%, 100% { opacity: 0.15; transform: scale(0.8); }
+      40% { opacity: 1; transform: scale(1); }
+    }
+
+    /* ── Success state ── */
+    .success-area {
+      text-align: center;
+      opacity: 0;
+      animation: fadeIn 0.3s ease forwards;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .success-msg {
+      font-family: var(--font-display);
+      font-size: 18px;
+      color: #1a1a1a;
+      margin-bottom: 24px;
+    }
+
+    .countdown {
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .countdown-block {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-width: 48px;
+    }
+
+    .countdown-num {
+      font-family: var(--font-body);
+      font-size: 28px;
+      font-weight: 500;
+      color: #1a1a1a;
+      line-height: 1.2;
+    }
+
+    .countdown-label {
+      font-family: var(--font-body);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--ink-faint);
+      margin-top: 2px;
+    }
+
+    .countdown-sep {
+      font-family: var(--font-body);
+      font-size: 24px;
+      color: var(--ink-faint);
+      line-height: 1.3;
+      padding: 0 2px;
+    }
+
+    .fade-out {
+      transition: opacity 0.4s ease;
+      opacity: 0 !important;
+      pointer-events: none;
+    }
+
+    /* ── Separator ── */
+    .separator {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin: 28px 0;
+      max-width: 280px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .separator::before,
+    .separator::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border-strong);
+    }
+
+    .separator span {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--ink-faint);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    /* ── Beta button ── */
+    .btn-beta {
+      text-decoration: none;
+      font-family: var(--font-body);
+      font-size: 15px;
+      font-weight: 500;
+      color: #222;
+      background: transparent;
+      border: 1.5px solid #222;
+      padding: 10px 36px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      letter-spacing: -0.01em;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-beta:hover {
+      background: #111;
+      color: white;
+      border-color: #111;
+    }
+
+    .btn-beta:active {
+      transform: translateY(0);
+    }
+
+    .btn-beta .arrow {
+      color: #222;
+      transition: transform 0.2s ease, color 0.2s ease;
+      font-size: 15px;
+    }
+
+    .btn-beta:hover .arrow {
+      color: white;
+      transform: translateX(3px);
+    }
+
+    /* ── Entrance animations ── */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(18px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .anim-1 { opacity: 0; animation: fadeUp 0.7s var(--ease-smooth) 0.15s forwards; }
+    .anim-2 { opacity: 0; animation: fadeUp 0.7s var(--ease-smooth) 0.3s forwards; }
+    .anim-3 { opacity: 0; animation: fadeUp 0.7s var(--ease-smooth) 0.42s forwards; }
+    .anim-4 { opacity: 0; animation: fadeUp 0.7s var(--ease-smooth) 0.54s forwards; }
+    .anim-5 { opacity: 0; animation: fadeUp 0.7s var(--ease-smooth) 0.64s forwards; }
+    .anim-6 { opacity: 0; animation: fadeUp 0.7s var(--ease-smooth) 0.74s forwards; }
+
+    @keyframes navFade {
+      from { opacity: 0; transform: translateY(-10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    nav { opacity: 0; animation: navFade 0.6s var(--ease-smooth) 0.05s forwards; }
+
+    /* ── Reduced motion ── */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-delay: 0ms !important;
+        transition-duration: 0.01ms !important;
+      }
+      .pulse-dot::after { animation: none; }
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 640px) {
+      nav { padding: 0 16px; height: 60px; }
+
+      main { padding: 0 10px 10px; }
+
+      .hero-card {
+        padding: 48px 24px 40px;
+        border-radius: var(--radius-md);
+      }
+
+      h1 { font-size: 2rem; }
+
+      .waitlist-form {
+        flex-direction: column;
+        border-radius: var(--radius-md);
+        padding: 4px;
+        gap: 4px;
+      }
+
+      .waitlist-form input {
+        width: 100%;
+        padding: 14px 20px;
+        text-align: center;
+      }
+
+      .btn-primary {
+        width: 100%;
+        padding: 14px 24px;
+        border-radius: 10px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <canvas id="waves"></canvas>
+
+  <nav>
+    <a href="#" class="logo">
+      <img src="PrettyMD Logo Without bg.png" alt="PrettyMD">
+    </a>
+    <button class="nav-cta" onclick="document.querySelector('.waitlist-form input').focus()">
+      Join Waitlist
+    </button>
+  </nav>
+
+  <main>
+    <div class="hero-card">
+      <div class="pills-container" id="pillsContainer"></div>
+      <div class="anim-1">
+        <span class="badge">
+          <span class="pulse-dot"></span>
+          Launching 3rd April
+        </span>
+      </div>
+
+      <h1 class="anim-2">Markdown viewer<br>made for vibe coders</h1>
+
+      <p class="subheadline anim-3">PrettyMD turns your raw .md into something<br>you would actually want to read, edit, and keep.</p>
+
+      <div class="waitlist-form anim-4">
+        <input type="email" placeholder="you@example.com" aria-label="Email address">
+        <button class="btn-primary" type="button"><span class="btn-primary-text">Join Waitlist</span></button>
+      </div>
+      <div class="form-msg anim-4" id="formMsg"></div>
+
+      <div class="separator anim-5">
+        <span>or</span>
+      </div>
+
+      <div class="anim-6">
+        <a class="btn-beta" href="https://x.com/somyatwts" target="_blank" rel="noopener noreferrer">
+          Be a beta tester
+          <span class="arrow">→</span>
+        </a>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // ── Animated wave background ──
+    const canvas = document.getElementById('waves');
+    const ctx = canvas.getContext('2d');
+    let w, h, time = 0;
+
+    function resize() {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      w = window.innerWidth;
+      h = window.innerHeight;
+      canvas.width = w * dpr;
+      canvas.height = h * dpr;
+      canvas.style.width = w + 'px';
+      canvas.style.height = h + 'px';
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    // Organic noise: sum of sine waves at different frequencies
+    function flowNoise(x, t, seed) {
+      return Math.sin(x * 0.0015 + t + seed) * 0.45
+           + Math.sin(x * 0.003 + t * 1.3 + seed * 2.1) * 0.3
+           + Math.sin(x * 0.0008 + t * 0.7 + seed * 0.5) * 0.6
+           + Math.sin(x * 0.006 + t * 1.8 + seed * 3.2) * 0.12;
+    }
+
+    const waves = [
+      { y: 0.08, amp: 35, speed: 0.12, color: '28, 27, 25', opacity: 0.025, seed: 0 },
+      { y: 0.16, amp: 28, speed: 0.17, color: '28, 27, 25', opacity: 0.02, seed: 1.5 },
+      { y: 0.26, amp: 40, speed: 0.10, color: '52, 184, 146', opacity: 0.015, seed: 3.0 },
+      { y: 0.36, amp: 22, speed: 0.21, color: '28, 27, 25', opacity: 0.02, seed: 4.8 },
+      { y: 0.46, amp: 32, speed: 0.14, color: '28, 27, 25', opacity: 0.018, seed: 6.1 },
+      { y: 0.56, amp: 26, speed: 0.19, color: '52, 184, 146', opacity: 0.012, seed: 7.7 },
+      { y: 0.65, amp: 38, speed: 0.11, color: '28, 27, 25', opacity: 0.022, seed: 9.2 },
+      { y: 0.74, amp: 24, speed: 0.16, color: '28, 27, 25', opacity: 0.018, seed: 10.5 },
+      { y: 0.83, amp: 30, speed: 0.13, color: '52, 184, 146', opacity: 0.014, seed: 12.0 },
+      { y: 0.92, amp: 20, speed: 0.22, color: '28, 27, 25', opacity: 0.02, seed: 13.8 },
+    ];
+
+    function draw() {
+      ctx.clearRect(0, 0, w, h);
+
+      for (const wave of waves) {
+        const t = time * wave.speed;
+        ctx.beginPath();
+        ctx.strokeStyle = `rgba(${wave.color}, ${wave.opacity})`;
+        ctx.lineWidth = 1.2;
+
+        for (let x = 0; x <= w; x += 3) {
+          const n = flowNoise(x, t, wave.seed);
+          const y = h * wave.y + n * wave.amp;
+          if (x === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+
+      time += 0.08;
+      requestAnimationFrame(draw);
+    }
+
+    // Respect reduced motion
+    const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+    resize();
+    window.addEventListener('resize', resize);
+    if (!prefersReduced.matches) draw();
+
+    // ── Pill rows animation ──
+    (function() {
+      const container = document.getElementById('pillsContainer');
+      const ROWS = 10;
+      const PILLS_PER_ROW = 12;
+      const MIN_W = 50, MAX_W = 170;
+      const MIN_DUR = 15, MAX_DUR = 31;
+      const TEAL_RATIO = 0.4;
+      const DARK_COLOR = '#2a2a2a';
+      const TEAL_COLOR = '#1D9E75';
+      const DARK_OPACITY = 0.08;
+      const TEAL_OPACITY = 0.11;
+
+      for (let i = 0; i < ROWS; i++) {
+        const row = document.createElement('div');
+        row.className = 'pill-row';
+        row.style.top = (i * 10) + '%';
+
+        const duration = MIN_DUR + Math.random() * (MAX_DUR - MIN_DUR);
+        const direction = i % 2 === 0 ? 'goRight' : 'goLeft';
+        const delay = -(Math.random() * duration);
+
+        row.style.animationName = direction;
+        row.style.animationDuration = duration + 's';
+        row.style.animationDelay = delay + 's';
+
+        // 24 pills (12 doubled) for seamless loop
+        for (let j = 0; j < PILLS_PER_ROW * 2; j++) {
+          const pill = document.createElement('div');
+          pill.className = 'pill';
+          const w = MIN_W + Math.random() * (MAX_W - MIN_W);
+          pill.style.width = w + 'px';
+
+          const isTeal = Math.random() < TEAL_RATIO;
+          pill.style.backgroundColor = isTeal ? TEAL_COLOR : DARK_COLOR;
+          pill.style.opacity = isTeal ? TEAL_OPACITY : DARK_OPACITY;
+
+          row.appendChild(pill);
+        }
+        container.appendChild(row);
+      }
+    })();
+
+    // ── Supabase client ──
+    const sbClient = window.supabase.createClient(
+      'https://gdbxgxkvnzdkdsuwwofj.supabase.co',
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdkYnhneGt2bnpka2RzdXd3b2ZqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ3MDMxNTIsImV4cCI6MjA5MDI3OTE1Mn0.yvip_QaoFCNE9sy2BOsTz3uwy9elLSV5bGScS2cpuAo'
+    );
+
+    // ── Expanding email input ──
+    (function() {
+      const ei = document.querySelector('.waitlist-form input');
+      const mirror = document.createElement('span');
+      mirror.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;font-size:16px;font-family:"DM Sans",system-ui,sans-serif;padding:0;border:none;';
+      document.body.appendChild(mirror);
+      const minWidth = ei.offsetWidth;
+      ei.addEventListener('input', function() {
+        mirror.textContent = this.value || this.placeholder;
+        const newWidth = mirror.offsetWidth + 24;
+        this.style.width = Math.max(minWidth, newWidth) + 'px';
+      });
+    })();
+
+    // ── Form interaction with Supabase ──
+    const primaryBtn = document.querySelector('.btn-primary');
+    const primaryText = primaryBtn.querySelector('.btn-primary-text');
+    const formMsg = document.getElementById('formMsg');
+    const emailInput = document.querySelector('.waitlist-form input');
+    const waitlistForm = document.querySelector('.waitlist-form');
+    const separatorEl = document.querySelector('.separator');
+    const betaBtnWrap = document.querySelector('.anim-6');
+
+    function showMsg(text, type) {
+      formMsg.innerHTML = text;
+      formMsg.className = 'form-msg anim-4 ' + type;
+    }
+
+    function clearMsg() { formMsg.textContent = ''; formMsg.className = 'form-msg anim-4'; }
+
+    // ── 1. Smart email validation (on submit only) ──
+    function validateEmail(val) {
+      if (!val) return 'Please enter a valid email address.';
+      if (!val.includes('@')) return 'Missing an @ \u2014 that doesn\u2019t look right';
+      const [local, domain] = val.split('@');
+      if (!local) return 'Your email needs something before the @';
+      if (!domain) return 'Missing everything after the @';
+      if (!domain.includes('.')) return 'Missing a dot \u2014 like .com or .dev';
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) return 'That doesn\u2019t look like a valid email';
+      return '';
+    }
+
+    // ── 2. Spam protection (cooldown only) ──
+    function isOnCooldown() {
+      const cd = localStorage.getItem('prettymd_waitlist_cooldown');
+      if (!cd) return false;
+      return (Date.now() - parseInt(cd, 10)) < 10000;
+    }
+
+    function setCooldown() {
+      localStorage.setItem('prettymd_waitlist_cooldown', Date.now().toString());
+    }
+
+    // ── 3. Loading dots helper ──
+    function showLoadingDots() {
+      primaryText.style.display = 'none';
+      let dots = primaryBtn.querySelector('.loading-dots');
+      if (!dots) {
+        dots = document.createElement('span');
+        dots.className = 'loading-dots';
+        dots.innerHTML = '<span></span><span></span><span></span>';
+        primaryBtn.appendChild(dots);
+      }
+      dots.style.display = 'inline-flex';
+    }
+
+    function hideLoadingDots() {
+      primaryText.style.display = '';
+      const dots = primaryBtn.querySelector('.loading-dots');
+      if (dots) dots.style.display = 'none';
+    }
+
+    // ── 5. Post-join success ──
+    function showSuccessState() {
+      // Fade out form, separator, beta button
+      waitlistForm.classList.add('fade-out');
+      formMsg.classList.add('fade-out');
+      separatorEl.classList.add('fade-out');
+      betaBtnWrap.classList.add('fade-out');
+
+      setTimeout(() => {
+        // Hide them
+        waitlistForm.style.display = 'none';
+        formMsg.style.display = 'none';
+        separatorEl.style.display = 'none';
+        betaBtnWrap.style.display = 'none';
+
+        // Build success area
+        const area = document.createElement('div');
+        area.className = 'success-area';
+
+        const msg = document.createElement('p');
+        msg.className = 'success-msg';
+        msg.textContent = 'You are in. See you on April 3rd.';
+        area.appendChild(msg);
+
+        const target = new Date('2026-04-03T00:00:00Z').getTime();
+
+        if (Date.now() >= target) {
+          const live = document.createElement('p');
+          live.className = 'success-msg';
+          live.textContent = 'We are live!';
+          area.appendChild(live);
+        } else {
+          const countdown = document.createElement('div');
+          countdown.className = 'countdown';
+          countdown.innerHTML = `
+            <div class="countdown-block"><span class="countdown-num" id="cd-d">--</span><span class="countdown-label">Days</span></div>
+            <span class="countdown-sep">:</span>
+            <div class="countdown-block"><span class="countdown-num" id="cd-h">--</span><span class="countdown-label">Hrs</span></div>
+            <span class="countdown-sep">:</span>
+            <div class="countdown-block"><span class="countdown-num" id="cd-m">--</span><span class="countdown-label">Min</span></div>
+            <span class="countdown-sep">:</span>
+            <div class="countdown-block"><span class="countdown-num" id="cd-s">--</span><span class="countdown-label">Sec</span></div>
+          `;
+          area.appendChild(countdown);
+        }
+
+        // Insert into DOM first so getElementById works
+        const subheadline = document.querySelector('.subheadline');
+        subheadline.parentNode.insertBefore(area, subheadline.nextSibling);
+
+        // Start countdown after DOM insertion
+        if (Date.now() < target) {
+          function updateCountdown() {
+            const now = Date.now();
+            if (now >= target) {
+              document.querySelector('.countdown').innerHTML = '<p class="success-msg">We are live!</p>';
+              return;
+            }
+            const diff = target - now;
+            const d = Math.floor(diff / 86400000);
+            const h = Math.floor((diff % 86400000) / 3600000);
+            const m = Math.floor((diff % 3600000) / 60000);
+            const s = Math.floor((diff % 60000) / 1000);
+            document.getElementById('cd-d').textContent = String(d).padStart(2, '0');
+            document.getElementById('cd-h').textContent = String(h).padStart(2, '0');
+            document.getElementById('cd-m').textContent = String(m).padStart(2, '0');
+            document.getElementById('cd-s').textContent = String(s).padStart(2, '0');
+          }
+          updateCountdown();
+          setInterval(updateCountdown, 1000);
+        }
+
+        // Confetti after 300ms
+        setTimeout(() => {
+          if (typeof confetti === 'function') {
+            confetti({
+              particleCount: 120,
+              spread: 80,
+              origin: { x: 0.5, y: 0.9 },
+              colors: ['#1D9E75', '#a8d8c8', '#ffffff', '#f0f0ec', '#2a2a2a'],
+              startVelocity: 45,
+              ticks: 200,
+              gravity: 0.8,
+              scalar: 0.9
+            });
+          }
+        }, 300);
+      }, 450);
+    }
+
+    // ── Main submit handler ──
+    async function handleWaitlistSubmit() {
+      const email = emailInput.value.trim();
+      clearMsg();
+
+      // Spam: cooldown
+      if (isOnCooldown()) {
+        showMsg('Please wait a moment before trying again.', 'info');
+        return;
+      }
+
+      // Validate
+      const valErr = validateEmail(email);
+      if (valErr) {
+        showMsg(valErr, 'error');
+        emailInput.focus();
+        return;
+      }
+
+      // Loading state
+      primaryBtn.disabled = true;
+      showLoadingDots();
+
+      try {
+        const { error } = await sbClient.from('waitlist').insert({ email });
+
+        if (error) {
+          hideLoadingDots();
+          setCooldown();
+
+          if (error.code === '23505') {
+            showMsg('\u2726 Easy there \u2014 you are already locked in. Have patience.', 'amber');
+          } else {
+            showMsg('Something went wrong. Please try again.', 'error');
+          }
+
+          setTimeout(() => { primaryBtn.disabled = false; }, 3000);
+        } else {
+          // Success — only set submitted here
+          hideLoadingDots();
+          emailInput.value = '';
+          showSuccessState();
+        }
+      } catch (e) {
+        hideLoadingDots();
+        setCooldown();
+        showMsg('Something went wrong. Please try again.', 'error');
+        setTimeout(() => { primaryBtn.disabled = false; }, 3000);
+      }
+    }
+
+    primaryBtn.addEventListener('click', handleWaitlistSubmit);
+
+    emailInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') handleWaitlistSubmit();
+    });
+  </script>
+</body>
+</html>
