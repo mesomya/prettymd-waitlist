@@ -981,7 +981,13 @@
 
           setTimeout(() => { primaryBtn.disabled = false; }, 3000);
         } else {
-          // Success — only set submitted here
+          // Success — Supabase insert worked, now send emails (non-blocking)
+          fetch('/api/waitlist', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email })
+          }).catch(() => {}); // email failure doesn't block signup
+
           hideLoadingDots();
           emailInput.value = '';
           showSuccessState();

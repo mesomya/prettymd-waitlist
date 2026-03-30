@@ -3,3 +3,4 @@ index-light.html
 .env
 .env.local
 .playwright-mcp/
+node_modules/
