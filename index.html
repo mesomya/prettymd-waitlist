@@ -882,6 +882,10 @@
         sub.textContent = 'We\u2019re putting the final touches on something worth the wait.';
         area.appendChild(sub);
 
+        // Insert into DOM
+        const subheadline = document.querySelector('.subheadline');
+        subheadline.parentNode.insertBefore(area, subheadline.nextSibling);
+
         // Confetti after 300ms
         setTimeout(() => {
           if (typeof confetti === 'function') {
